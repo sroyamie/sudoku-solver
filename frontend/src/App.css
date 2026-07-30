@@ -99,3 +99,57 @@ button:disabled {
 .preset-btn:hover {
   background-color: #388e3c;
 }
+
+.top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.dark-toggle {
+  padding: 8px 14px;
+  font-size: 13px;
+  border: none;
+  border-radius: 8px;
+  background-color: #424242;
+  color: white;
+  cursor: pointer;
+}
+
+.timer-display {
+  text-align: center;
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: #444;
+}
+
+.app.dark {
+  background-color: #121212;
+  color: #eee;
+  border-radius: 12px;
+  padding-bottom: 20px;
+}
+
+.app.dark .cell {
+  background-color: #1e1e1e;
+  color: #eee;
+  border-color: #444;
+}
+
+.app.dark .border-right {
+  border-right-color: #888;
+}
+
+.app.dark .border-bottom {
+  border-bottom-color: #888;
+}
+
+.app.dark .timer-display {
+  color: #ccc;
+}
+
+.app.dark .grid {
+  border-color: #888;
+}
