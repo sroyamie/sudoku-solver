@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import './App.css';
 
-const API_URL = 'http://127.0.0.1:5000';
+const API_URL = '';
 const EMPTY_BOARD = Array(9).fill().map(() => Array(9).fill(0));
 
 const PRESET_PUZZLES = {
@@ -47,7 +47,7 @@ function App() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`${API_URL}/solve`, {
+      const res = await fetch(`${API_URL}/api/solve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ board }),
