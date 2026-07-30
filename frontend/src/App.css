@@ -1,0 +1,101 @@
+.app {
+  max-width: 500px;
+  margin: 60px auto;
+  text-align: center;
+  font-family: 'Segoe UI', sans-serif;
+  padding: 20px;
+}
+
+h1 {
+  font-size: 28px;
+  margin-bottom: 30px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(9, 40px);
+  grid-template-rows: repeat(9, 40px);
+  justify-content: center;
+  border: 3px solid #333;
+  width: fit-content;
+  margin: 0 auto;
+}
+
+.cell {
+  width: 40px;
+  height: 40px;
+  text-align: center;
+  font-size: 18px;
+  border: 1px solid #ccc;
+  outline: none;
+}
+
+.cell:focus {
+  background-color: #e3f2fd;
+}
+
+.border-right {
+  border-right: 3px solid #333;
+}
+
+.border-bottom {
+  border-bottom: 3px solid #333;
+}
+
+.buttons {
+  margin-top: 24px;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+button {
+  padding: 12px 24px;
+  font-size: 15px;
+  border: none;
+  border-radius: 8px;
+  background-color: #0288d1;
+  color: white;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+button:hover {
+  background-color: #0277bd;
+}
+
+button:disabled {
+  background-color: #90caf9;
+  cursor: not-allowed;
+}
+
+.clear-btn {
+  background-color: #757575;
+}
+
+.clear-btn:hover {
+  background-color: #616161;
+}
+
+.error {
+  color: #d32f2f;
+  font-weight: 500;
+  margin-top: 16px;
+}
+
+.presets {
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+.preset-btn {
+  background-color: #43a047;
+  font-size: 13px;
+  padding: 8px 14px;
+}
+
+.preset-btn:hover {
+  background-color: #388e3c;
+}
