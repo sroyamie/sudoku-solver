@@ -302,3 +302,64 @@ button:disabled {
 .hint-btn {
   background-color: #fb8c00;
 }
+
+.generator-row {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.generator-row select {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  font-size: 13px;
+}
+
+.generate-btn {
+  padding: 8px 16px;
+  font-size: 13px;
+  border: none;
+  border-radius: 8px;
+  background-color: #00897b;
+  color: white;
+  cursor: pointer;
+}
+
+.io-row {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.io-btn {
+  padding: 8px 14px;
+  font-size: 13px;
+  border: none;
+  border-radius: 8px;
+  background-color: #5c6bc0;
+  color: white;
+  cursor: pointer;
+  display: inline-block;
+}
+
+.message {
+  text-align: center;
+  color: #2e7d32;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  word-break: break-all;
+  padding: 0 10px;
+}
+
+@media (max-width: 500px) {
+  .generator-row select, .generate-btn, .io-btn {
+    font-size: 12px;
+    padding: 6px 10px;
+  }
+}

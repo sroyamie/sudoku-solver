@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+import random
 
 app = Flask(__name__)
 
@@ -29,6 +30,46 @@ def solve_sudoku(board):
                         board[row][col] = 0
                 return False
     return True
+
+def fill_board(board):
+    for row in range(9):
+        for col in range(9):
+            if board[row][col] == 0:
+                nums = list(range(1, 10))
+                random.shuffle(nums)
+                for num in nums:
+                    if is_valid(board, row, col, num):
+                        board[row][col] = num
+                        if fill_board(board):
+                            return True
+                        board[row][col] = 0
+                return False
+    return True
+
+def generate_puzzle(difficulty):
+    board = [[0] * 9 for _ in range(9)]
+    fill_board(board)
+    puzzle = [row[:] for row in board]
+
+    clues_target = {'easy': 40, 'medium': 32, 'hard': 26}.get(difficulty, 32)
+    cells = [(r, c) for r in range(9) for c in range(9)]
+    random.shuffle(cells)
+
+    total_filled = 81
+    for (r, c) in cells:
+        if total_filled <= clues_target:
+            break
+        puzzle[r][c] = 0
+        total_filled -= 1
+
+    return puzzle
+
+@app.route("/api/generate", methods=["POST"])
+def generate():
+    data = request.get_json() or {}
+    difficulty = data.get("difficulty", "medium")
+    puzzle = generate_puzzle(difficulty)
+    return jsonify({"board": puzzle})
 
 @app.route("/api/solve", methods=["POST"])
 def solve():

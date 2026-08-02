@@ -69,7 +69,6 @@ const playSound = (type) => {
   }
 };
 
-// Fallback duplicate-rule checker, only used when we don't yet have a known solution
 const getDuplicateConflicts = (board) => {
   const conflicts = Array(9).fill().map(() => Array(9).fill(false));
   const markIfDuplicate = (cells) => {
@@ -96,13 +95,26 @@ const getDuplicateConflicts = (board) => {
   return conflicts;
 };
 
+// Encode/decode board <-> compact 81-character string, for sharing/export
+const encodeBoard = (board) => board.flat().join('');
+const decodeBoard = (str) => {
+  if (!/^\d{81}$/.test(str)) return null;
+  const board = [];
+  for (let i = 0; i < 9; i++) {
+    board.push(str.slice(i * 9, i * 9 + 9).split('').map(Number));
+  }
+  return board;
+};
+
 function App() {
   const [board, setBoard] = useState(EMPTY_BOARD);
   const [notes, setNotes] = useState(emptyNotes());
   const [selectedCell, setSelectedCell] = useState(null);
   const [notesMode, setNotesMode] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
   const [seconds, setSeconds] = useState(0);
   const [timerRunning, setTimerRunning] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
@@ -110,10 +122,11 @@ function App() {
   const [mistakeCount, setMistakeCount] = useState(0);
   const [hintCount, setHintCount] = useState(0);
   const [showStats, setShowStats] = useState(false);
-  const [solutionReady, setSolutionReady] = useState(false);
+  const [genDifficulty, setGenDifficulty] = useState('medium');
 
   const historyRef = useRef([{ board: EMPTY_BOARD.map(r => [...r]), notes: emptyNotes() }]);
-  const solutionRef = useRef(null); // the known correct solution for the current puzzle, once solved
+  const solutionRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     let interval;
@@ -123,14 +136,25 @@ function App() {
     return () => clearInterval(interval);
   }, [timerRunning]);
 
+  // On first load, check for a shared puzzle in the URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const shared = params.get('puzzle');
+    if (shared) {
+      const decoded = decodeBoard(shared);
+      if (decoded) {
+        loadCustomBoard(decoded);
+        setMessage('Loaded shared puzzle!');
+      }
+    }
+  }, []);
+
   const formatTime = (totalSeconds) => {
     const mins = Math.floor(totalSeconds / 60);
     const secs = totalSeconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Mistake detection: compare against the known solution if we have one,
-  // otherwise fall back to basic duplicate-rule checking
   const getConflicts = (currentBoard) => {
     if (solutionRef.current) {
       const conflicts = Array(9).fill().map(() => Array(9).fill(false));
@@ -195,7 +219,6 @@ function App() {
       const newBoard = board.map((r) => [...r]);
       newBoard[row][col] = digit;
 
-      // Check correctness against known solution (or fallback duplicate check)
       const wrong = solutionRef.current
         ? digit !== solutionRef.current[row][col]
         : getDuplicateConflicts(newBoard)[row][col];
@@ -255,7 +278,6 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedCell, notesMode, board, notes, historyIndex]);
 
-  // Solve the ORIGINAL given puzzle (not the user's live-edited board) and cache it
   const computeSolution = async (originalBoard) => {
     try {
       const res = await fetch(`${API_URL}/api/solve`, {
@@ -266,7 +288,6 @@ function App() {
       const data = await res.json();
       if (data.solved) {
         solutionRef.current = data.board;
-        setSolutionReady(true);
       }
     } catch (err) {
       console.error('Failed to precompute solution:', err);
@@ -301,7 +322,6 @@ function App() {
   const solvePuzzle = async () => {
     setError('');
 
-    // If we already know the solution, just reveal it instantly
     if (solutionRef.current) {
       commitChange(solutionRef.current.map(r => [...r]), emptyNotes());
       setTimerRunning(false);
@@ -311,7 +331,6 @@ function App() {
       return;
     }
 
-    // Otherwise (custom/manual puzzle), solve whatever's currently on the board
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/solve`, {
@@ -348,6 +367,7 @@ function App() {
     setBoard(empty);
     setNotes(notesEmpty);
     setError('');
+    setMessage('');
     setSeconds(0);
     setTimerRunning(false);
     setSelectedCell(null);
@@ -355,15 +375,14 @@ function App() {
     setHintCount(0);
     setShowStats(false);
     solutionRef.current = null;
-    setSolutionReady(false);
   };
 
-  const loadPreset = (difficulty) => {
-    const preset = PRESET_PUZZLES[difficulty].map((row) => [...row]);
+  // Shared setup logic for loading any board (preset, generated, imported, or shared)
+  const loadCustomBoard = (newBoard) => {
     const notesEmpty = emptyNotes();
-    historyRef.current = [{ board: preset.map((r) => [...r]), notes: emptyNotes() }];
+    historyRef.current = [{ board: newBoard.map((r) => [...r]), notes: emptyNotes() }];
     setHistoryIndex(0);
-    setBoard(preset);
+    setBoard(newBoard);
     setNotes(notesEmpty);
     setError('');
     setSeconds(0);
@@ -373,8 +392,73 @@ function App() {
     setHintCount(0);
     setShowStats(false);
     solutionRef.current = null;
-    setSolutionReady(false);
-    computeSolution(preset); // precompute the correct solution right away, in the background
+    computeSolution(newBoard);
+  };
+
+  const loadPreset = (difficulty) => {
+    loadCustomBoard(PRESET_PUZZLES[difficulty].map((row) => [...row]));
+    setMessage('');
+  };
+
+  const generatePuzzle = async () => {
+    setGenerating(true);
+    setError('');
+    setMessage('');
+    try {
+      const res = await fetch(`${API_URL}/api/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ difficulty: genDifficulty }),
+      });
+      const data = await res.json();
+      loadCustomBoard(data.board);
+    } catch (err) {
+      setError('Could not generate a new puzzle');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const sharePuzzle = async () => {
+    const encoded = encodeBoard(board);
+    const url = `${window.location.origin}${window.location.pathname}?puzzle=${encoded}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setMessage('Share link copied to clipboard!');
+    } catch (err) {
+      setMessage(url); // fallback: show the link directly if clipboard access fails
+    }
+  };
+
+  const downloadPuzzle = () => {
+    const encoded = encodeBoard(board);
+    const blob = new Blob([encoded], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'sudoku-puzzle.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+    setMessage('Puzzle downloaded!');
+  };
+
+  const handleImportFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target.result.trim();
+      const decoded = decodeBoard(text);
+      if (decoded) {
+        loadCustomBoard(decoded);
+        setMessage('Puzzle imported successfully!');
+      } else {
+        setError('Invalid puzzle file format');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   return (
@@ -397,6 +481,28 @@ function App() {
         <button className="preset-btn" onClick={() => loadPreset('medium')}>Medium</button>
         <button className="preset-btn" onClick={() => loadPreset('hard')}>Hard</button>
       </div>
+
+      <div className="generator-row">
+        <select value={genDifficulty} onChange={(e) => setGenDifficulty(e.target.value)}>
+          <option value="easy">Easy</option>
+          <option value="medium">Medium</option>
+          <option value="hard">Hard</option>
+        </select>
+        <button className="generate-btn" onClick={generatePuzzle} disabled={generating}>
+          🎲 {generating ? 'Generating...' : 'Generate New Puzzle'}
+        </button>
+      </div>
+
+      <div className="io-row">
+        <button className="io-btn" onClick={sharePuzzle}>🔗 Share</button>
+        <button className="io-btn" onClick={downloadPuzzle}>⬇️ Download</button>
+        <label className="io-btn">
+          ⬆️ Import
+          <input type="file" accept=".txt" onChange={handleImportFile} hidden ref={fileInputRef} />
+        </label>
+      </div>
+
+      {message && <p className="message">{message}</p>}
 
       {showStats && (
         <div className="stats-summary">
