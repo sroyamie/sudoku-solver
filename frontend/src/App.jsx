@@ -69,10 +69,9 @@ const playSound = (type) => {
   }
 };
 
-// Returns a 9x9 boolean grid: true if that cell conflicts with Sudoku rules
-const getConflicts = (board) => {
+// Fallback duplicate-rule checker, only used when we don't yet have a known solution
+const getDuplicateConflicts = (board) => {
   const conflicts = Array(9).fill().map(() => Array(9).fill(false));
-
   const markIfDuplicate = (cells) => {
     const seen = {};
     cells.forEach(([r, c]) => {
@@ -82,12 +81,9 @@ const getConflicts = (board) => {
       seen[val].push([r, c]);
     });
     Object.values(seen).forEach((positions) => {
-      if (positions.length > 1) {
-        positions.forEach(([r, c]) => { conflicts[r][c] = true; });
-      }
+      if (positions.length > 1) positions.forEach(([r, c]) => { conflicts[r][c] = true; });
     });
   };
-
   for (let r = 0; r < 9; r++) markIfDuplicate([...Array(9)].map((_, c) => [r, c]));
   for (let c = 0; c < 9; c++) markIfDuplicate([...Array(9)].map((_, r) => [r, c]));
   for (let br = 0; br < 3; br++) {
@@ -97,7 +93,6 @@ const getConflicts = (board) => {
       markIfDuplicate(cells);
     }
   }
-
   return conflicts;
 };
 
@@ -115,8 +110,10 @@ function App() {
   const [mistakeCount, setMistakeCount] = useState(0);
   const [hintCount, setHintCount] = useState(0);
   const [showStats, setShowStats] = useState(false);
+  const [solutionReady, setSolutionReady] = useState(false);
 
   const historyRef = useRef([{ board: EMPTY_BOARD.map(r => [...r]), notes: emptyNotes() }]);
+  const solutionRef = useRef(null); // the known correct solution for the current puzzle, once solved
 
   useEffect(() => {
     let interval;
@@ -130,6 +127,23 @@ function App() {
     const mins = Math.floor(totalSeconds / 60);
     const secs = totalSeconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Mistake detection: compare against the known solution if we have one,
+  // otherwise fall back to basic duplicate-rule checking
+  const getConflicts = (currentBoard) => {
+    if (solutionRef.current) {
+      const conflicts = Array(9).fill().map(() => Array(9).fill(false));
+      for (let r = 0; r < 9; r++) {
+        for (let c = 0; c < 9; c++) {
+          if (currentBoard[r][c] !== 0 && currentBoard[r][c] !== solutionRef.current[r][c]) {
+            conflicts[r][c] = true;
+          }
+        }
+      }
+      return conflicts;
+    }
+    return getDuplicateConflicts(currentBoard);
   };
 
   const conflicts = getConflicts(board);
@@ -181,9 +195,12 @@ function App() {
       const newBoard = board.map((r) => [...r]);
       newBoard[row][col] = digit;
 
-      // Check if this placement creates a new conflict
-      const newConflicts = getConflicts(newBoard);
-      if (newConflicts[row][col]) {
+      // Check correctness against known solution (or fallback duplicate check)
+      const wrong = solutionRef.current
+        ? digit !== solutionRef.current[row][col]
+        : getDuplicateConflicts(newBoard)[row][col];
+
+      if (wrong) {
         setMistakeCount((prev) => prev + 1);
         playSound('error');
       }
@@ -238,49 +255,64 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedCell, notesMode, board, notes, historyIndex]);
 
-  const getHint = async () => {
-    setLoading(true);
-    setError('');
+  // Solve the ORIGINAL given puzzle (not the user's live-edited board) and cache it
+  const computeSolution = async (originalBoard) => {
     try {
       const res = await fetch(`${API_URL}/api/solve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ board }),
+        body: JSON.stringify({ board: originalBoard }),
       });
       const data = await res.json();
-
       if (data.solved) {
-        // Find empty cells and reveal one at random
-        const emptyCells = [];
-        for (let r = 0; r < 9; r++) {
-          for (let c = 0; c < 9; c++) {
-            if (board[r][c] === 0) emptyCells.push([r, c]);
-          }
-        }
-        if (emptyCells.length === 0) {
-          setError('Board is already full');
-        } else {
-          const [r, c] = emptyCells[Math.floor(Math.random() * emptyCells.length)];
-          const newBoard = board.map((row) => [...row]);
-          newBoard[r][c] = data.board[r][c];
-          const newNotes = notes.map((row) => row.map((cell) => [...cell]));
-          newNotes[r][c] = [];
-          commitChange(newBoard, newNotes);
-          setHintCount((prev) => prev + 1);
-        }
-      } else {
-        setError('Fix conflicting cells before requesting a hint');
+        solutionRef.current = data.board;
+        setSolutionReady(true);
       }
     } catch (err) {
-      setError('Could not connect to the server');
-    } finally {
-      setLoading(false);
+      console.error('Failed to precompute solution:', err);
     }
   };
 
-  const solvePuzzle = async () => {
-    setLoading(true);
+  const getHint = () => {
+    if (!solutionRef.current) {
+      setError('Still preparing this puzzle, try again in a moment');
+      return;
+    }
+    const emptyCells = [];
+    for (let r = 0; r < 9; r++) {
+      for (let c = 0; c < 9; c++) {
+        if (board[r][c] === 0) emptyCells.push([r, c]);
+      }
+    }
+    if (emptyCells.length === 0) {
+      setError('Board is already full');
+      return;
+    }
+    const [r, c] = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+    const newBoard = board.map((row) => [...row]);
+    newBoard[r][c] = solutionRef.current[r][c];
+    const newNotes = notes.map((row) => row.map((cell) => [...cell]));
+    newNotes[r][c] = [];
+    commitChange(newBoard, newNotes);
+    setHintCount((prev) => prev + 1);
     setError('');
+  };
+
+  const solvePuzzle = async () => {
+    setError('');
+
+    // If we already know the solution, just reveal it instantly
+    if (solutionRef.current) {
+      commitChange(solutionRef.current.map(r => [...r]), emptyNotes());
+      setTimerRunning(false);
+      setShowStats(true);
+      playSound('success');
+      confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
+      return;
+    }
+
+    // Otherwise (custom/manual puzzle), solve whatever's currently on the board
+    setLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/solve`, {
         method: 'POST',
@@ -290,6 +322,7 @@ function App() {
       const data = await res.json();
 
       if (data.solved) {
+        solutionRef.current = data.board;
         commitChange(data.board, emptyNotes());
         setTimerRunning(false);
         setShowStats(true);
@@ -321,6 +354,8 @@ function App() {
     setMistakeCount(0);
     setHintCount(0);
     setShowStats(false);
+    solutionRef.current = null;
+    setSolutionReady(false);
   };
 
   const loadPreset = (difficulty) => {
@@ -337,6 +372,9 @@ function App() {
     setMistakeCount(0);
     setHintCount(0);
     setShowStats(false);
+    solutionRef.current = null;
+    setSolutionReady(false);
+    computeSolution(preset); // precompute the correct solution right away, in the background
   };
 
   return (
@@ -405,7 +443,7 @@ function App() {
         <button className={`control-btn ${notesMode ? 'active' : ''}`} onClick={() => setNotesMode(!notesMode)}>
           ✏️ Notes {notesMode ? 'On' : 'Off'}
         </button>
-        <button className="control-btn hint-btn" onClick={getHint} disabled={loading}>💡 Hint</button>
+        <button className="control-btn hint-btn" onClick={getHint}>💡 Hint</button>
       </div>
 
       <div className="number-pad">
