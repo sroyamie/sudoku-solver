@@ -153,3 +153,106 @@ button:disabled {
 .app.dark .grid {
   border-color: #888;
 }
+
+.cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  position: relative;
+}
+
+.cell.selected {
+  background-color: #bbdefb;
+}
+
+.app.dark .cell.selected {
+  background-color: #37474f;
+}
+
+.cell-value {
+  font-size: 18px;
+}
+
+.notes-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  width: 100%;
+  height: 100%;
+}
+
+.note-num {
+  font-size: 9px;
+  color: #1565c0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app.dark .note-num {
+  color: #64b5f6;
+}
+
+.controls-row {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin: 16px 0;
+  flex-wrap: wrap;
+}
+
+.control-btn {
+  padding: 8px 14px;
+  font-size: 13px;
+  border: none;
+  border-radius: 8px;
+  background-color: #616161;
+  color: white;
+  cursor: pointer;
+}
+
+.control-btn:disabled {
+  background-color: #bdbdbd;
+  cursor: not-allowed;
+}
+
+.control-btn.active {
+  background-color: #8e24aa;
+}
+
+.number-pad {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin: 16px 0;
+  flex-wrap: wrap;
+}
+
+.number-pad button {
+  width: 40px;
+  height: 40px;
+  font-size: 16px;
+  border: none;
+  border-radius: 8px;
+  background-color: #1565c0;
+  color: white;
+  cursor: pointer;
+}
+
+.number-pad .erase-btn {
+  background-color: #757575;
+}
+
+@media (max-width: 500px) {
+  .grid {
+    grid-template-columns: repeat(9, 32px);
+    grid-template-rows: repeat(9, 32px);
+  }
+  .cell { width: 32px; height: 32px; }
+  .cell-value { font-size: 14px; }
+  .note-num { font-size: 7px; }
+  .number-pad button { width: 32px; height: 32px; font-size: 14px; }
+  h1 { font-size: 20px; }
+  .top-bar { flex-wrap: wrap; gap: 10px; }
+}
