@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import confetti from 'canvas-confetti';
+import { supabase } from './supabaseClient';
+import Auth from './Auth';
 import './App.css';
 
 const API_URL = '';
@@ -123,6 +125,7 @@ function App() {
   const [hintCount, setHintCount] = useState(0);
   const [showStats, setShowStats] = useState(false);
   const [genDifficulty, setGenDifficulty] = useState('medium');
+  const [user, setUser] = useState(null);
 
   const historyRef = useRef([{ board: EMPTY_BOARD.map(r => [...r]), notes: emptyNotes() }]);
   const solutionRef = useRef(null);
@@ -135,6 +138,18 @@ function App() {
     }
     return () => clearInterval(interval);
   }, [timerRunning]);
+
+  useEffect(() => {
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    setUser(session?.user ?? null);
+  });
+
+  const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    setUser(session?.user ?? null);
+  });
+
+  return () => listener.subscription.unsubscribe();
+}, []);
 
   // On first load, check for a shared puzzle in the URL
   useEffect(() => {
@@ -463,6 +478,7 @@ function App() {
 
   return (
     <div className={`app ${darkMode ? 'dark' : ''}`}>
+      <Auth user={user} />
       <div className="top-bar">
         <h1>🧩 Sudoku Solver</h1>
         <button className="dark-toggle" onClick={() => setDarkMode(!darkMode)}>
