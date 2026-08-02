@@ -126,6 +126,9 @@ function App() {
   const [showStats, setShowStats] = useState(false);
   const [genDifficulty, setGenDifficulty] = useState('medium');
   const [user, setUser] = useState(null);
+  const [savedGames, setSavedGames] = useState([]);
+const [showStatsPanel, setShowStatsPanel] = useState(false);
+const [statsData, setStatsData] = useState(null);
 
   const historyRef = useRef([{ board: EMPTY_BOARD.map(r => [...r]), notes: emptyNotes() }]);
   const solutionRef = useRef(null);
@@ -338,13 +341,14 @@ function App() {
     setError('');
 
     if (solutionRef.current) {
-      commitChange(solutionRef.current.map(r => [...r]), emptyNotes());
-      setTimerRunning(false);
-      setShowStats(true);
-      playSound('success');
-      confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
-      return;
-    }
+  commitChange(solutionRef.current.map(r => [...r]), emptyNotes());
+  setTimerRunning(false);
+  setShowStats(true);
+  playSound('success');
+  confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
+  if (user) saveCompletedGame();
+  return;
+}
 
     setLoading(true);
     try {
@@ -356,13 +360,14 @@ function App() {
       const data = await res.json();
 
       if (data.solved) {
-        solutionRef.current = data.board;
-        commitChange(data.board, emptyNotes());
-        setTimerRunning(false);
-        setShowStats(true);
-        playSound('success');
-        confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
-      } else {
+  solutionRef.current = data.board;
+  commitChange(data.board, emptyNotes());
+  setTimerRunning(false);
+  setShowStats(true);
+  playSound('success');
+  confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
+  if (user) saveCompletedGame();
+} else {
         setError(data.error || 'No solution exists for this puzzle');
         playSound('error');
       }
@@ -476,6 +481,99 @@ function App() {
     e.target.value = '';
   };
 
+  const saveCompletedGame = async () => {
+  try {
+    await supabase.from('sudoku_games').insert({
+      user_id: user.id,
+      board: encodeBoard(solutionRef.current),
+      difficulty: genDifficulty,
+      seconds_elapsed: seconds,
+      mistakes: mistakeCount,
+      hints_used: hintCount,
+      completed: true,
+    });
+  } catch (err) {
+    console.error('Failed to save completed game:', err);
+  }
+};
+
+const saveProgress = async () => {
+  if (!user) {
+    setMessage('Please log in to save progress');
+    return;
+  }
+  try {
+    await supabase.from('sudoku_games').insert({
+      user_id: user.id,
+      board: encodeBoard(board),
+      difficulty: genDifficulty,
+      seconds_elapsed: seconds,
+      mistakes: mistakeCount,
+      hints_used: hintCount,
+      completed: false,
+    });
+    setMessage('Progress saved!');
+  } catch (err) {
+    setMessage('Failed to save progress');
+  }
+};
+
+const loadSavedGames = async () => {
+  if (!user) return;
+  try {
+    const { data, error } = await supabase
+      .from('sudoku_games')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    setSavedGames(data);
+  } catch (err) {
+    console.error('Failed to load saved games:', err);
+  }
+};
+
+const resumeGame = (game) => {
+  const decoded = decodeBoard(game.board);
+  if (decoded) {
+    loadCustomBoard(decoded);
+    setSeconds(game.seconds_elapsed);
+    setMistakeCount(game.mistakes);
+    setHintCount(game.hints_used);
+    setMessage('Resumed saved game');
+    setShowStatsPanel(false);
+  }
+};
+
+const loadStats = async () => {
+  if (!user) return;
+  try {
+    const { data, error } = await supabase
+      .from('sudoku_games')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('completed', true);
+    if (error) throw error;
+
+    const totalSolved = data.length;
+    const totalTime = data.reduce((sum, g) => sum + g.seconds_elapsed, 0);
+    const totalMistakes = data.reduce((sum, g) => sum + g.mistakes, 0);
+    const totalHints = data.reduce((sum, g) => sum + g.hints_used, 0);
+    const byDifficulty = { easy: 0, medium: 0, hard: 0 };
+    data.forEach((g) => { if (byDifficulty[g.difficulty] !== undefined) byDifficulty[g.difficulty]++; });
+
+    setStatsData({ totalSolved, totalTime, totalMistakes, totalHints, byDifficulty });
+  } catch (err) {
+    console.error('Failed to load stats:', err);
+  }
+};
+
+const openStatsPanel = () => {
+  setShowStatsPanel(true);
+  loadSavedGames();
+  loadStats();
+};
+
   return (
     <div className={`app ${darkMode ? 'dark' : ''}`}>
       <Auth user={user} />
@@ -517,6 +615,40 @@ function App() {
           <input type="file" accept=".txt" onChange={handleImportFile} hidden ref={fileInputRef} />
         </label>
       </div>
+
+      {user && (
+  <div className="io-row">
+    <button className="io-btn" onClick={saveProgress}>💾 Save Progress</button>
+    <button className="io-btn" onClick={openStatsPanel}>📊 My Stats</button>
+  </div>
+)}
+
+{showStatsPanel && (
+  <div className="stats-panel">
+    <button className="close-panel" onClick={() => setShowStatsPanel(false)}>✕</button>
+    <h3>📊 Your Statistics</h3>
+    {statsData && (
+      <div className="stats-grid">
+        <div>✅ Solved: {statsData.totalSolved}</div>
+        <div>⏱ Total time: {formatTime(statsData.totalTime)}</div>
+        <div>❌ Total mistakes: {statsData.totalMistakes}</div>
+        <div>💡 Total hints: {statsData.totalHints}</div>
+        <div>Easy: {statsData.byDifficulty.easy}</div>
+        <div>Medium: {statsData.byDifficulty.medium}</div>
+        <div>Hard: {statsData.byDifficulty.hard}</div>
+      </div>
+    )}
+
+    <h3>💾 Saved Games</h3>
+    {savedGames.filter(g => !g.completed).length === 0 && <p className="no-data">No saved games in progress</p>}
+    {savedGames.filter(g => !g.completed).map((game) => (
+      <div key={game.id} className="saved-game-item">
+        <span>{game.difficulty} — {formatTime(game.seconds_elapsed)}</span>
+        <button className="resume-btn" onClick={() => resumeGame(game)}>Resume</button>
+      </div>
+    ))}
+  </div>
+)}
 
       {message && <p className="message">{message}</p>}
 
