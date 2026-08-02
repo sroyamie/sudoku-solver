@@ -18,6 +18,17 @@ const PRESET_PUZZLES = {
     [0,0,0,4,1,9,0,0,5],
     [0,0,0,0,8,0,0,7,9],
   ],
+  medium: [
+    [0,2,0,6,0,8,0,0,0],
+    [5,8,0,0,0,9,7,0,0],
+    [0,0,0,0,4,0,0,0,0],
+    [3,7,0,0,0,0,5,0,0],
+    [6,0,0,0,0,0,0,0,4],
+    [0,0,8,0,0,0,0,1,3],
+    [0,0,0,0,2,0,0,0,0],
+    [0,0,9,8,0,0,0,3,6],
+    [0,0,0,3,0,6,0,9,0],
+  ],
   hard: [
     [0,0,0,6,0,0,4,0,0],
     [7,0,0,0,0,3,6,0,0],
@@ -58,6 +69,38 @@ const playSound = (type) => {
   }
 };
 
+// Returns a 9x9 boolean grid: true if that cell conflicts with Sudoku rules
+const getConflicts = (board) => {
+  const conflicts = Array(9).fill().map(() => Array(9).fill(false));
+
+  const markIfDuplicate = (cells) => {
+    const seen = {};
+    cells.forEach(([r, c]) => {
+      const val = board[r][c];
+      if (val === 0) return;
+      if (!seen[val]) seen[val] = [];
+      seen[val].push([r, c]);
+    });
+    Object.values(seen).forEach((positions) => {
+      if (positions.length > 1) {
+        positions.forEach(([r, c]) => { conflicts[r][c] = true; });
+      }
+    });
+  };
+
+  for (let r = 0; r < 9; r++) markIfDuplicate([...Array(9)].map((_, c) => [r, c]));
+  for (let c = 0; c < 9; c++) markIfDuplicate([...Array(9)].map((_, r) => [r, c]));
+  for (let br = 0; br < 3; br++) {
+    for (let bc = 0; bc < 3; bc++) {
+      const cells = [];
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) cells.push([br * 3 + i, bc * 3 + j]);
+      markIfDuplicate(cells);
+    }
+  }
+
+  return conflicts;
+};
+
 function App() {
   const [board, setBoard] = useState(EMPTY_BOARD);
   const [notes, setNotes] = useState(emptyNotes());
@@ -69,6 +112,9 @@ function App() {
   const [timerRunning, setTimerRunning] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [historyIndex, setHistoryIndex] = useState(0);
+  const [mistakeCount, setMistakeCount] = useState(0);
+  const [hintCount, setHintCount] = useState(0);
+  const [showStats, setShowStats] = useState(false);
 
   const historyRef = useRef([{ board: EMPTY_BOARD.map(r => [...r]), notes: emptyNotes() }]);
 
@@ -85,6 +131,8 @@ function App() {
     const secs = totalSeconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
+
+  const conflicts = getConflicts(board);
 
   const commitChange = (newBoard, newNotes) => {
     const snapshot = {
@@ -132,6 +180,14 @@ function App() {
     } else {
       const newBoard = board.map((r) => [...r]);
       newBoard[row][col] = digit;
+
+      // Check if this placement creates a new conflict
+      const newConflicts = getConflicts(newBoard);
+      if (newConflicts[row][col]) {
+        setMistakeCount((prev) => prev + 1);
+        playSound('error');
+      }
+
       const newNotes = notes.map((r) => r.map((c) => [...c]));
       newNotes[row][col] = [];
       commitChange(newBoard, newNotes);
@@ -182,6 +238,46 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedCell, notesMode, board, notes, historyIndex]);
 
+  const getHint = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`${API_URL}/api/solve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ board }),
+      });
+      const data = await res.json();
+
+      if (data.solved) {
+        // Find empty cells and reveal one at random
+        const emptyCells = [];
+        for (let r = 0; r < 9; r++) {
+          for (let c = 0; c < 9; c++) {
+            if (board[r][c] === 0) emptyCells.push([r, c]);
+          }
+        }
+        if (emptyCells.length === 0) {
+          setError('Board is already full');
+        } else {
+          const [r, c] = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+          const newBoard = board.map((row) => [...row]);
+          newBoard[r][c] = data.board[r][c];
+          const newNotes = notes.map((row) => row.map((cell) => [...cell]));
+          newNotes[r][c] = [];
+          commitChange(newBoard, newNotes);
+          setHintCount((prev) => prev + 1);
+        }
+      } else {
+        setError('Fix conflicting cells before requesting a hint');
+      }
+    } catch (err) {
+      setError('Could not connect to the server');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const solvePuzzle = async () => {
     setLoading(true);
     setError('');
@@ -196,6 +292,7 @@ function App() {
       if (data.solved) {
         commitChange(data.board, emptyNotes());
         setTimerRunning(false);
+        setShowStats(true);
         playSound('success');
         confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
       } else {
@@ -221,6 +318,9 @@ function App() {
     setSeconds(0);
     setTimerRunning(false);
     setSelectedCell(null);
+    setMistakeCount(0);
+    setHintCount(0);
+    setShowStats(false);
   };
 
   const loadPreset = (difficulty) => {
@@ -234,6 +334,9 @@ function App() {
     setSeconds(0);
     setTimerRunning(true);
     setSelectedCell(null);
+    setMistakeCount(0);
+    setHintCount(0);
+    setShowStats(false);
   };
 
   return (
@@ -245,18 +348,30 @@ function App() {
         </button>
       </div>
 
-      <div className="timer-display">⏱ {formatTime(seconds)}</div>
+      <div className="stats-bar">
+        <span>⏱ {formatTime(seconds)}</span>
+        <span>❌ Mistakes: {mistakeCount}</span>
+        <span>💡 Hints: {hintCount}</span>
+      </div>
 
       <div className="presets">
-        <button className="preset-btn" onClick={() => loadPreset('easy')}>Load Easy Puzzle</button>
-        <button className="preset-btn" onClick={() => loadPreset('hard')}>Load Hard Puzzle</button>
+        <button className="preset-btn" onClick={() => loadPreset('easy')}>Easy</button>
+        <button className="preset-btn" onClick={() => loadPreset('medium')}>Medium</button>
+        <button className="preset-btn" onClick={() => loadPreset('hard')}>Hard</button>
       </div>
+
+      {showStats && (
+        <div className="stats-summary">
+          🎉 Solved in {formatTime(seconds)} with {mistakeCount} mistake{mistakeCount !== 1 ? 's' : ''} and {hintCount} hint{hintCount !== 1 ? 's' : ''} used!
+        </div>
+      )}
 
       <div className="grid">
         {board.map((row, rowIndex) =>
           row.map((cell, colIndex) => {
             const isSelected = selectedCell && selectedCell.row === rowIndex && selectedCell.col === colIndex;
             const cellNotes = notes[rowIndex][colIndex];
+            const hasConflict = conflicts[rowIndex][colIndex];
             return (
               <div
                 key={`${rowIndex}-${colIndex}`}
@@ -264,7 +379,8 @@ function App() {
                 className={`cell 
                   ${colIndex % 3 === 2 && colIndex !== 8 ? 'border-right' : ''} 
                   ${rowIndex % 3 === 2 && rowIndex !== 8 ? 'border-bottom' : ''}
-                  ${isSelected ? 'selected' : ''}`}
+                  ${isSelected ? 'selected' : ''}
+                  ${hasConflict ? 'conflict' : ''}`}
               >
                 {cell !== 0 ? (
                   <span className="cell-value">{cell}</span>
@@ -289,6 +405,7 @@ function App() {
         <button className={`control-btn ${notesMode ? 'active' : ''}`} onClick={() => setNotesMode(!notesMode)}>
           ✏️ Notes {notesMode ? 'On' : 'Off'}
         </button>
+        <button className="control-btn hint-btn" onClick={getHint} disabled={loading}>💡 Hint</button>
       </div>
 
       <div className="number-pad">
