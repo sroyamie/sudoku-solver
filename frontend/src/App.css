@@ -470,3 +470,50 @@ button:disabled {
   color: white;
   cursor: pointer;
 }
+
+.viz-controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0;
+  flex-wrap: wrap;
+}
+
+.viz-controls select {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  font-size: 12px;
+}
+
+.viz-progress {
+  font-size: 12px;
+  color: #666;
+}
+
+.app.dark .viz-progress {
+  color: #aaa;
+}
+
+.viz-btn {
+  background-color: #d81b60;
+}
+
+.cell.viz-place {
+  background-color: #c8e6c9;
+  transition: background-color 0.1s ease;
+}
+
+.cell.viz-remove {
+  background-color: #ffccbc;
+  transition: background-color 0.1s ease;
+}
+
+.app.dark .cell.viz-place {
+  background-color: #2e5e33;
+}
+
+.app.dark .cell.viz-remove {
+  background-color: #6e3229;
+}

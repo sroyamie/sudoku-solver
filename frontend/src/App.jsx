@@ -97,7 +97,6 @@ const getDuplicateConflicts = (board) => {
   return conflicts;
 };
 
-// Encode/decode board <-> compact 81-character string, for sharing/export
 const encodeBoard = (board) => board.flat().join('');
 const decodeBoard = (str) => {
   if (!/^\d{81}$/.test(str)) return null;
@@ -106,6 +105,72 @@ const decodeBoard = (str) => {
     board.push(str.slice(i * 9, i * 9 + 9).split('').map(Number));
   }
   return board;
+};
+
+// Step-by-step solver using a most-constrained-cell-first heuristic
+// (dramatically fewer steps than naive backtracking, especially on hard puzzles)
+const getCandidates = (board, row, col) => {
+  const used = new Set();
+  for (let x = 0; x < 9; x++) {
+    used.add(board[row][x]);
+    used.add(board[x][col]);
+  }
+  const startRow = row - row % 3;
+  const startCol = col - col % 3;
+  for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 3; j++) {
+      used.add(board[startRow + i][startCol + j]);
+    }
+  }
+  const candidates = [];
+  for (let n = 1; n <= 9; n++) {
+    if (!used.has(n)) candidates.push(n);
+  }
+  return candidates;
+};
+
+const findBestEmptyCell = (board) => {
+  let best = null;
+  let bestCandidates = null;
+  for (let row = 0; row < 9; row++) {
+    for (let col = 0; col < 9; col++) {
+      if (board[row][col] === 0) {
+        const candidates = getCandidates(board, row, col);
+        if (!best || candidates.length < bestCandidates.length) {
+          best = [row, col];
+          bestCandidates = candidates;
+          if (candidates.length === 1) return { cell: best, candidates: bestCandidates };
+        }
+      }
+    }
+  }
+  return { cell: best, candidates: bestCandidates };
+};
+
+const generateSteps = (initialBoard) => {
+  const board = initialBoard.map((r) => [...r]);
+  const steps = [];
+  const MAX_STEPS = 30000;
+  let aborted = false;
+
+  const solve = () => {
+    if (steps.length > MAX_STEPS) { aborted = true; return true; }
+    const { cell, candidates } = findBestEmptyCell(board);
+    if (!cell) return true;
+    const [row, col] = cell;
+    for (const num of candidates) {
+      board[row][col] = num;
+      steps.push({ row, col, value: num, type: 'place' });
+      if (solve()) return true;
+      board[row][col] = 0;
+      steps.push({ row, col, value: 0, type: 'remove' });
+      if (steps.length > MAX_STEPS) { aborted = true; return true; }
+    }
+    return false;
+  };
+
+  const solved = solve();
+  return { steps, solved: solved && !aborted, aborted };
 };
 
 function App() {
@@ -127,8 +192,17 @@ function App() {
   const [genDifficulty, setGenDifficulty] = useState('medium');
   const [user, setUser] = useState(null);
   const [savedGames, setSavedGames] = useState([]);
-const [showStatsPanel, setShowStatsPanel] = useState(false);
-const [statsData, setStatsData] = useState(null);
+  const [showStatsPanel, setShowStatsPanel] = useState(false);
+  const [statsData, setStatsData] = useState(null);
+
+  // Visualization state
+  const [visualizing, setVisualizing] = useState(false);
+  const [vizPlaying, setVizPlaying] = useState(false);
+  const [vizIndex, setVizIndex] = useState(0);
+  const [vizSpeed, setVizSpeed] = useState(30);
+  const [vizBoard, setVizBoard] = useState(null);
+  const [vizLastStep, setVizLastStep] = useState(null);
+  const vizStepsRef = useRef([]);
 
   const historyRef = useRef([{ board: EMPTY_BOARD.map(r => [...r]), notes: emptyNotes() }]);
   const solutionRef = useRef(null);
@@ -143,19 +217,6 @@ const [statsData, setStatsData] = useState(null);
   }, [timerRunning]);
 
   useEffect(() => {
-  supabase.auth.getSession().then(({ data: { session } }) => {
-    setUser(session?.user ?? null);
-  });
-
-  const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-    setUser(session?.user ?? null);
-  });
-
-  return () => listener.subscription.unsubscribe();
-}, []);
-
-  // On first load, check for a shared puzzle in the URL
-  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const shared = params.get('puzzle');
     if (shared) {
@@ -166,6 +227,38 @@ const [statsData, setStatsData] = useState(null);
       }
     }
   }, []);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  // Visualization playback loop
+  useEffect(() => {
+    if (!visualizing || !vizPlaying) return;
+    if (vizIndex >= vizStepsRef.current.length) {
+      setVizPlaying(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      const step = vizStepsRef.current[vizIndex];
+      setVizBoard((prev) => {
+        const next = prev.map((r) => [...r]);
+        next[step.row][step.col] = step.value;
+        return next;
+      });
+      setVizLastStep(step);
+      setVizIndex((prev) => prev + 1);
+    }, vizSpeed);
+    return () => clearTimeout(timer);
+  }, [visualizing, vizPlaying, vizIndex, vizSpeed]);
 
   const formatTime = (totalSeconds) => {
     const mins = Math.floor(totalSeconds / 60);
@@ -268,6 +361,7 @@ const [statsData, setStatsData] = useState(null);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
+      if (visualizing) return;
       if (!selectedCell) return;
       const { row, col } = selectedCell;
 
@@ -294,7 +388,7 @@ const [statsData, setStatsData] = useState(null);
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedCell, notesMode, board, notes, historyIndex]);
+  }, [selectedCell, notesMode, board, notes, historyIndex, visualizing]);
 
   const computeSolution = async (originalBoard) => {
     try {
@@ -337,18 +431,34 @@ const [statsData, setStatsData] = useState(null);
     setError('');
   };
 
+  const saveCompletedGame = async () => {
+    try {
+      await supabase.from('sudoku_games').insert({
+        user_id: user.id,
+        board: encodeBoard(solutionRef.current),
+        difficulty: genDifficulty,
+        seconds_elapsed: seconds,
+        mistakes: mistakeCount,
+        hints_used: hintCount,
+        completed: true,
+      });
+    } catch (err) {
+      console.error('Failed to save completed game:', err);
+    }
+  };
+
   const solvePuzzle = async () => {
     setError('');
 
     if (solutionRef.current) {
-  commitChange(solutionRef.current.map(r => [...r]), emptyNotes());
-  setTimerRunning(false);
-  setShowStats(true);
-  playSound('success');
-  confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
-  if (user) saveCompletedGame();
-  return;
-}
+      commitChange(solutionRef.current.map(r => [...r]), emptyNotes());
+      setTimerRunning(false);
+      setShowStats(true);
+      playSound('success');
+      confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
+      if (user) saveCompletedGame();
+      return;
+    }
 
     setLoading(true);
     try {
@@ -360,14 +470,14 @@ const [statsData, setStatsData] = useState(null);
       const data = await res.json();
 
       if (data.solved) {
-  solutionRef.current = data.board;
-  commitChange(data.board, emptyNotes());
-  setTimerRunning(false);
-  setShowStats(true);
-  playSound('success');
-  confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
-  if (user) saveCompletedGame();
-} else {
+        solutionRef.current = data.board;
+        commitChange(data.board, emptyNotes());
+        setTimerRunning(false);
+        setShowStats(true);
+        playSound('success');
+        confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
+        if (user) saveCompletedGame();
+      } else {
         setError(data.error || 'No solution exists for this puzzle');
         playSound('error');
       }
@@ -395,9 +505,9 @@ const [statsData, setStatsData] = useState(null);
     setHintCount(0);
     setShowStats(false);
     solutionRef.current = null;
+    stopVisualization();
   };
 
-  // Shared setup logic for loading any board (preset, generated, imported, or shared)
   const loadCustomBoard = (newBoard) => {
     const notesEmpty = emptyNotes();
     historyRef.current = [{ board: newBoard.map((r) => [...r]), notes: emptyNotes() }];
@@ -418,6 +528,7 @@ const [statsData, setStatsData] = useState(null);
   const loadPreset = (difficulty) => {
     loadCustomBoard(PRESET_PUZZLES[difficulty].map((row) => [...row]));
     setMessage('');
+    stopVisualization();
   };
 
   const generatePuzzle = async () => {
@@ -437,6 +548,7 @@ const [statsData, setStatsData] = useState(null);
     } finally {
       setGenerating(false);
     }
+    stopVisualization();
   };
 
   const sharePuzzle = async () => {
@@ -446,7 +558,7 @@ const [statsData, setStatsData] = useState(null);
       await navigator.clipboard.writeText(url);
       setMessage('Share link copied to clipboard!');
     } catch (err) {
-      setMessage(url); // fallback: show the link directly if clipboard access fails
+      setMessage(url);
     }
   };
 
@@ -481,98 +593,125 @@ const [statsData, setStatsData] = useState(null);
     e.target.value = '';
   };
 
-  const saveCompletedGame = async () => {
-  try {
-    await supabase.from('sudoku_games').insert({
-      user_id: user.id,
-      board: encodeBoard(solutionRef.current),
-      difficulty: genDifficulty,
-      seconds_elapsed: seconds,
-      mistakes: mistakeCount,
-      hints_used: hintCount,
-      completed: true,
+  const saveProgress = async () => {
+    if (!user) {
+      setMessage('Please log in to save progress');
+      return;
+    }
+    try {
+      await supabase.from('sudoku_games').insert({
+        user_id: user.id,
+        board: encodeBoard(board),
+        difficulty: genDifficulty,
+        seconds_elapsed: seconds,
+        mistakes: mistakeCount,
+        hints_used: hintCount,
+        completed: false,
+      });
+      setMessage('Progress saved!');
+    } catch (err) {
+      setMessage('Failed to save progress');
+    }
+  };
+
+  const loadSavedGames = async () => {
+    if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from('sudoku_games')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setSavedGames(data);
+    } catch (err) {
+      console.error('Failed to load saved games:', err);
+    }
+  };
+
+  const resumeGame = (game) => {
+    const decoded = decodeBoard(game.board);
+    if (decoded) {
+      loadCustomBoard(decoded);
+      setSeconds(game.seconds_elapsed);
+      setMistakeCount(game.mistakes);
+      setHintCount(game.hints_used);
+      setMessage('Resumed saved game');
+      setShowStatsPanel(false);
+    }
+  };
+
+  const loadStats = async () => {
+    if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from('sudoku_games')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('completed', true);
+      if (error) throw error;
+
+      const totalSolved = data.length;
+      const totalTime = data.reduce((sum, g) => sum + g.seconds_elapsed, 0);
+      const totalMistakes = data.reduce((sum, g) => sum + g.mistakes, 0);
+      const totalHints = data.reduce((sum, g) => sum + g.hints_used, 0);
+      const byDifficulty = { easy: 0, medium: 0, hard: 0 };
+      data.forEach((g) => { if (byDifficulty[g.difficulty] !== undefined) byDifficulty[g.difficulty]++; });
+
+      setStatsData({ totalSolved, totalTime, totalMistakes, totalHints, byDifficulty });
+    } catch (err) {
+      console.error('Failed to load stats:', err);
+    }
+  };
+
+  const openStatsPanel = () => {
+    setShowStatsPanel(true);
+    loadSavedGames();
+    loadStats();
+  };
+
+  // Visualization controls
+  const startVisualization = () => {
+    const original = historyRef.current[0].board;
+    const { steps, solved, aborted } = generateSteps(original);
+    if (aborted) {
+      setError('This puzzle is too complex to visualize step-by-step');
+      return;
+    }
+    if (!solved) {
+      setError('No solution exists for this puzzle');
+      return;
+    }
+    vizStepsRef.current = steps;
+    setVizIndex(0);
+    setVizBoard(original.map((r) => [...r]));
+    setVizLastStep(null);
+    setVisualizing(true);
+    setVizPlaying(true);
+    setError('');
+  };
+
+  const toggleVizPlay = () => setVizPlaying((prev) => !prev);
+
+  const skipToEnd = () => {
+    const original = historyRef.current[0].board;
+    const finalBoard = original.map((r) => [...r]);
+    vizStepsRef.current.forEach((step) => {
+      finalBoard[step.row][step.col] = step.value;
     });
-  } catch (err) {
-    console.error('Failed to save completed game:', err);
-  }
-};
+    // Reapply only 'place' values properly by replaying all steps in order (last write wins per cell is fine since final state is deterministic)
+    setVizBoard(solutionRef.current ? solutionRef.current.map(r => [...r]) : finalBoard);
+    setVizIndex(vizStepsRef.current.length);
+    setVizPlaying(false);
+  };
 
-const saveProgress = async () => {
-  if (!user) {
-    setMessage('Please log in to save progress');
-    return;
-  }
-  try {
-    await supabase.from('sudoku_games').insert({
-      user_id: user.id,
-      board: encodeBoard(board),
-      difficulty: genDifficulty,
-      seconds_elapsed: seconds,
-      mistakes: mistakeCount,
-      hints_used: hintCount,
-      completed: false,
-    });
-    setMessage('Progress saved!');
-  } catch (err) {
-    setMessage('Failed to save progress');
-  }
-};
-
-const loadSavedGames = async () => {
-  if (!user) return;
-  try {
-    const { data, error } = await supabase
-      .from('sudoku_games')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    setSavedGames(data);
-  } catch (err) {
-    console.error('Failed to load saved games:', err);
-  }
-};
-
-const resumeGame = (game) => {
-  const decoded = decodeBoard(game.board);
-  if (decoded) {
-    loadCustomBoard(decoded);
-    setSeconds(game.seconds_elapsed);
-    setMistakeCount(game.mistakes);
-    setHintCount(game.hints_used);
-    setMessage('Resumed saved game');
-    setShowStatsPanel(false);
-  }
-};
-
-const loadStats = async () => {
-  if (!user) return;
-  try {
-    const { data, error } = await supabase
-      .from('sudoku_games')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('completed', true);
-    if (error) throw error;
-
-    const totalSolved = data.length;
-    const totalTime = data.reduce((sum, g) => sum + g.seconds_elapsed, 0);
-    const totalMistakes = data.reduce((sum, g) => sum + g.mistakes, 0);
-    const totalHints = data.reduce((sum, g) => sum + g.hints_used, 0);
-    const byDifficulty = { easy: 0, medium: 0, hard: 0 };
-    data.forEach((g) => { if (byDifficulty[g.difficulty] !== undefined) byDifficulty[g.difficulty]++; });
-
-    setStatsData({ totalSolved, totalTime, totalMistakes, totalHints, byDifficulty });
-  } catch (err) {
-    console.error('Failed to load stats:', err);
-  }
-};
-
-const openStatsPanel = () => {
-  setShowStatsPanel(true);
-  loadSavedGames();
-  loadStats();
-};
+  const stopVisualization = () => {
+    setVisualizing(false);
+    setVizPlaying(false);
+    setVizBoard(null);
+    setVizLastStep(null);
+    setVizIndex(0);
+  };
 
   return (
     <div className={`app ${darkMode ? 'dark' : ''}`}>
@@ -590,65 +729,84 @@ const openStatsPanel = () => {
         <span>💡 Hints: {hintCount}</span>
       </div>
 
-      <div className="presets">
-        <button className="preset-btn" onClick={() => loadPreset('easy')}>Easy</button>
-        <button className="preset-btn" onClick={() => loadPreset('medium')}>Medium</button>
-        <button className="preset-btn" onClick={() => loadPreset('hard')}>Hard</button>
-      </div>
+      {!visualizing && (
+        <>
+          <div className="presets">
+            <button className="preset-btn" onClick={() => loadPreset('easy')}>Easy</button>
+            <button className="preset-btn" onClick={() => loadPreset('medium')}>Medium</button>
+            <button className="preset-btn" onClick={() => loadPreset('hard')}>Hard</button>
+          </div>
 
-      <div className="generator-row">
-        <select value={genDifficulty} onChange={(e) => setGenDifficulty(e.target.value)}>
-          <option value="easy">Easy</option>
-          <option value="medium">Medium</option>
-          <option value="hard">Hard</option>
-        </select>
-        <button className="generate-btn" onClick={generatePuzzle} disabled={generating}>
-          🎲 {generating ? 'Generating...' : 'Generate New Puzzle'}
-        </button>
-      </div>
+          <div className="generator-row">
+            <select value={genDifficulty} onChange={(e) => setGenDifficulty(e.target.value)}>
+              <option value="easy">Easy</option>
+              <option value="medium">Medium</option>
+              <option value="hard">Hard</option>
+            </select>
+            <button className="generate-btn" onClick={generatePuzzle} disabled={generating}>
+              🎲 {generating ? 'Generating...' : 'Generate New Puzzle'}
+            </button>
+          </div>
 
-      <div className="io-row">
-        <button className="io-btn" onClick={sharePuzzle}>🔗 Share</button>
-        <button className="io-btn" onClick={downloadPuzzle}>⬇️ Download</button>
-        <label className="io-btn">
-          ⬆️ Import
-          <input type="file" accept=".txt" onChange={handleImportFile} hidden ref={fileInputRef} />
-        </label>
-      </div>
+          <div className="io-row">
+            <button className="io-btn" onClick={sharePuzzle}>🔗 Share</button>
+            <button className="io-btn" onClick={downloadPuzzle}>⬇️ Download</button>
+            <label className="io-btn">
+              ⬆️ Import
+              <input type="file" accept=".txt" onChange={handleImportFile} hidden ref={fileInputRef} />
+            </label>
+            <button className="io-btn viz-btn" onClick={startVisualization}>🎬 Visualize Solve</button>
+          </div>
 
-      {user && (
-  <div className="io-row">
-    <button className="io-btn" onClick={saveProgress}>💾 Save Progress</button>
-    <button className="io-btn" onClick={openStatsPanel}>📊 My Stats</button>
-  </div>
-)}
+          {user && (
+            <div className="io-row">
+              <button className="io-btn" onClick={saveProgress}>💾 Save Progress</button>
+              <button className="io-btn" onClick={openStatsPanel}>📊 My Stats</button>
+            </div>
+          )}
+        </>
+      )}
 
-{showStatsPanel && (
-  <div className="stats-panel">
-    <button className="close-panel" onClick={() => setShowStatsPanel(false)}>✕</button>
-    <h3>📊 Your Statistics</h3>
-    {statsData && (
-      <div className="stats-grid">
-        <div>✅ Solved: {statsData.totalSolved}</div>
-        <div>⏱ Total time: {formatTime(statsData.totalTime)}</div>
-        <div>❌ Total mistakes: {statsData.totalMistakes}</div>
-        <div>💡 Total hints: {statsData.totalHints}</div>
-        <div>Easy: {statsData.byDifficulty.easy}</div>
-        <div>Medium: {statsData.byDifficulty.medium}</div>
-        <div>Hard: {statsData.byDifficulty.hard}</div>
-      </div>
-    )}
+      {visualizing && (
+        <div className="viz-controls">
+          <button className="control-btn" onClick={toggleVizPlay}>{vizPlaying ? '⏸ Pause' : '▶️ Play'}</button>
+          <button className="control-btn" onClick={skipToEnd}>⏭ Skip to End</button>
+          <button className="control-btn" onClick={stopVisualization}>✕ Stop</button>
+          <select value={vizSpeed} onChange={(e) => setVizSpeed(Number(e.target.value))}>
+            <option value={100}>Slow</option>
+            <option value={30}>Normal</option>
+            <option value={5}>Fast</option>
+          </select>
+          <span className="viz-progress">{vizIndex} / {vizStepsRef.current.length} steps</span>
+        </div>
+      )}
 
-    <h3>💾 Saved Games</h3>
-    {savedGames.filter(g => !g.completed).length === 0 && <p className="no-data">No saved games in progress</p>}
-    {savedGames.filter(g => !g.completed).map((game) => (
-      <div key={game.id} className="saved-game-item">
-        <span>{game.difficulty} — {formatTime(game.seconds_elapsed)}</span>
-        <button className="resume-btn" onClick={() => resumeGame(game)}>Resume</button>
-      </div>
-    ))}
-  </div>
-)}
+      {showStatsPanel && (
+        <div className="stats-panel">
+          <button className="close-panel" onClick={() => setShowStatsPanel(false)}>✕</button>
+          <h3>📊 Your Statistics</h3>
+          {statsData && (
+            <div className="stats-grid">
+              <div>✅ Solved: {statsData.totalSolved}</div>
+              <div>⏱ Total time: {formatTime(statsData.totalTime)}</div>
+              <div>❌ Total mistakes: {statsData.totalMistakes}</div>
+              <div>💡 Total hints: {statsData.totalHints}</div>
+              <div>Easy: {statsData.byDifficulty.easy}</div>
+              <div>Medium: {statsData.byDifficulty.medium}</div>
+              <div>Hard: {statsData.byDifficulty.hard}</div>
+            </div>
+          )}
+
+          <h3>💾 Saved Games</h3>
+          {savedGames.filter(g => !g.completed).length === 0 && <p className="no-data">No saved games in progress</p>}
+          {savedGames.filter(g => !g.completed).map((game) => (
+            <div key={game.id} className="saved-game-item">
+              <span>{game.difficulty} — {formatTime(game.seconds_elapsed)}</span>
+              <button className="resume-btn" onClick={() => resumeGame(game)}>Resume</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {message && <p className="message">{message}</p>}
 
@@ -659,58 +817,79 @@ const openStatsPanel = () => {
       )}
 
       <div className="grid">
-        {board.map((row, rowIndex) =>
-          row.map((cell, colIndex) => {
-            const isSelected = selectedCell && selectedCell.row === rowIndex && selectedCell.col === colIndex;
-            const cellNotes = notes[rowIndex][colIndex];
-            const hasConflict = conflicts[rowIndex][colIndex];
-            return (
-              <div
-                key={`${rowIndex}-${colIndex}`}
-                onClick={() => setSelectedCell({ row: rowIndex, col: colIndex })}
-                className={`cell 
-                  ${colIndex % 3 === 2 && colIndex !== 8 ? 'border-right' : ''} 
-                  ${rowIndex % 3 === 2 && rowIndex !== 8 ? 'border-bottom' : ''}
-                  ${isSelected ? 'selected' : ''}
-                  ${hasConflict ? 'conflict' : ''}`}
-              >
-                {cell !== 0 ? (
-                  <span className="cell-value">{cell}</span>
-                ) : cellNotes.length > 0 ? (
-                  <div className="notes-grid">
-                    {[1,2,3,4,5,6,7,8,9].map((n) => (
-                      <span key={n} className="note-num">{cellNotes.includes(n) ? n : ''}</span>
-                    ))}
+        {visualizing
+          ? vizBoard.map((row, rowIndex) =>
+              row.map((cell, colIndex) => {
+                const isActive = vizLastStep && vizLastStep.row === rowIndex && vizLastStep.col === colIndex;
+                return (
+                  <div
+                    key={`viz-${rowIndex}-${colIndex}`}
+                    className={`cell 
+                      ${colIndex % 3 === 2 && colIndex !== 8 ? 'border-right' : ''} 
+                      ${rowIndex % 3 === 2 && rowIndex !== 8 ? 'border-bottom' : ''}
+                      ${isActive ? (vizLastStep.type === 'place' ? 'viz-place' : 'viz-remove') : ''}`}
+                  >
+                    {cell !== 0 ? <span className="cell-value">{cell}</span> : null}
                   </div>
-                ) : null}
-              </div>
-            );
-          })
-        )}
+                );
+              })
+            )
+          : board.map((row, rowIndex) =>
+              row.map((cell, colIndex) => {
+                const isSelected = selectedCell && selectedCell.row === rowIndex && selectedCell.col === colIndex;
+                const cellNotes = notes[rowIndex][colIndex];
+                const hasConflict = conflicts[rowIndex][colIndex];
+                return (
+                  <div
+                    key={`${rowIndex}-${colIndex}`}
+                    onClick={() => setSelectedCell({ row: rowIndex, col: colIndex })}
+                    className={`cell 
+                      ${colIndex % 3 === 2 && colIndex !== 8 ? 'border-right' : ''} 
+                      ${rowIndex % 3 === 2 && rowIndex !== 8 ? 'border-bottom' : ''}
+                      ${isSelected ? 'selected' : ''}
+                      ${hasConflict ? 'conflict' : ''}`}
+                  >
+                    {cell !== 0 ? (
+                      <span className="cell-value">{cell}</span>
+                    ) : cellNotes.length > 0 ? (
+                      <div className="notes-grid">
+                        {[1,2,3,4,5,6,7,8,9].map((n) => (
+                          <span key={n} className="note-num">{cellNotes.includes(n) ? n : ''}</span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })
+            )}
       </div>
 
       {error && <p className="error">{error}</p>}
 
-      <div className="controls-row">
-        <button className="control-btn" onClick={undo} disabled={historyIndex <= 0}>↶ Undo</button>
-        <button className="control-btn" onClick={redo} disabled={historyIndex >= historyRef.current.length - 1}>↷ Redo</button>
-        <button className={`control-btn ${notesMode ? 'active' : ''}`} onClick={() => setNotesMode(!notesMode)}>
-          ✏️ Notes {notesMode ? 'On' : 'Off'}
-        </button>
-        <button className="control-btn hint-btn" onClick={getHint}>💡 Hint</button>
-      </div>
+      {!visualizing && (
+        <>
+          <div className="controls-row">
+            <button className="control-btn" onClick={undo} disabled={historyIndex <= 0}>↶ Undo</button>
+            <button className="control-btn" onClick={redo} disabled={historyIndex >= historyRef.current.length - 1}>↷ Redo</button>
+            <button className={`control-btn ${notesMode ? 'active' : ''}`} onClick={() => setNotesMode(!notesMode)}>
+              ✏️ Notes {notesMode ? 'On' : 'Off'}
+            </button>
+            <button className="control-btn hint-btn" onClick={getHint}>💡 Hint</button>
+          </div>
 
-      <div className="number-pad">
-        {[1,2,3,4,5,6,7,8,9].map((n) => (
-          <button key={n} onClick={() => enterDigit(n)}>{n}</button>
-        ))}
-        <button className="erase-btn" onClick={clearCell}>⌫</button>
-      </div>
+          <div className="number-pad">
+            {[1,2,3,4,5,6,7,8,9].map((n) => (
+              <button key={n} onClick={() => enterDigit(n)}>{n}</button>
+            ))}
+            <button className="erase-btn" onClick={clearCell}>⌫</button>
+          </div>
 
-      <div className="buttons">
-        <button onClick={solvePuzzle} disabled={loading}>{loading ? 'Solving...' : 'Solve'}</button>
-        <button onClick={clearBoard} className="clear-btn">Clear</button>
-      </div>
+          <div className="buttons">
+            <button onClick={solvePuzzle} disabled={loading}>{loading ? 'Solving...' : 'Solve'}</button>
+            <button onClick={clearBoard} className="clear-btn">Clear</button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
