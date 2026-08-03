@@ -1,42 +1,67 @@
 # 🧩 Sudoku Solver
 
-A full-stack web application that solves 9x9 Sudoku puzzles instantly using a backtracking algorithm, with an interactive grid interface.
+A full-stack Sudoku web app that goes well beyond a basic solver — featuring real user accounts, saved progress, a statistics dashboard, puzzle generation, and a live step-by-step visualization of the solving algorithm.
 
 ## Features
-- Interactive 9x9 Sudoku grid with input validation (digits 1-9 only)
-- Instant solving powered by a recursive backtracking algorithm
-- Preset example puzzles (easy/hard) for quick demos
-- Clear board functionality
-- Error handling for invalid or unsolvable puzzles
+
+**Core gameplay**
+- Interactive 9x9 grid with keyboard navigation, click-to-select, and an on-screen number pad (mobile-friendly)
+- Auto Notes (candidate pencil marks) with dedicated notes mode
+- Undo/Redo with full history tracking
+- Real-time mistake detection (compares entries against the puzzle's actual solution, not just basic rule conflicts)
+- Hint system that reveals one correct cell at a time
+- Three difficulty levels (Easy/Medium/Hard), both as curated presets and via a puzzle generator
+- Timer, mistake counter, and hint counter, with a post-solve performance summary
+
+**Puzzle I/O**
+- Puzzle Generator — creates a new random valid puzzle at a chosen difficulty
+- Share Puzzle — encodes the board into a URL others can open directly
+- Download/Import Puzzle — save a puzzle to a file and reload it later
+
+**Accounts & persistence**
+- Full signup/login/logout via Supabase Auth
+- Save in-progress games and resume them later
+- Personal statistics dashboard (puzzles solved, total time, mistakes, hints, breakdown by difficulty)
+- Row-Level Security ensures each user can only ever access their own saved data
+
+**Step-by-Step Visualization**
+- Watch the backtracking algorithm solve a puzzle live, cell by cell, with placements and backtracks color-coded
+- Uses a most-constrained-cell-first (MRV) heuristic instead of naive backtracking — this cut the "Hard" preset from ~1.75 million backtracking steps down to about 13,000, making live visualization actually feasible
+- Playback controls: play/pause, adjustable speed, skip-to-end
+
+**Polish**
+- Dark mode
+- Sound effects and confetti animation on solve
+- Fully responsive layout for mobile
 
 ## Tech Stack
-- **Frontend:** React (Vite)
+- **Frontend:** React (Vite), canvas-confetti
 - **Backend:** Flask (Python), deployed as a Vercel serverless function
-- **Algorithm:** Backtracking with constraint satisfaction (row/column/3x3 box validation)
+- **Algorithm:** Backtracking with constraint validation; MRV heuristic for the visualization engine (implemented client-side in JS for smooth animation)
+- **Auth & Database:** Supabase (Postgres + built-in authentication, Row-Level Security policies)
 - **Deployment:** Single Vercel deployment serving both frontend and backend
 
-## How It Works
-The React frontend renders an editable 9x9 grid. On clicking "Solve," the current board state is sent to a Flask API endpoint running as a Vercel serverless function. The backend recursively attempts to fill empty cells with valid digits, checking row, column, and 3x3 box constraints at each step, backtracking whenever a dead end is reached until the puzzle is fully solved (or determined unsolvable).
+## API Endpoints
+- `POST /api/solve` — Solve a given 9x9 board
+- `POST /api/generate` — Generate a new puzzle at a given difficulty
 
-## API Endpoint
-- `POST /api/solve` — Accepts a 9x9 board (0s for empty cells) and returns the solved board, or an error if no solution exists.
+## How the Solver Works
+The backend uses standard backtracking with row/column/3x3-box constraint checking to solve puzzles instantly. For the step-by-step visualization, a separate solver runs client-side in JavaScript using a most-constrained-cell heuristic (always filling in the cell with the fewest legal candidates first), which is what makes it practical to animate even genuinely hard puzzles without freezing the browser or generating an unmanageable number of steps.
+
+Mistake detection, hints, and the "Solve" button all rely on a solution computed once when a puzzle loads (not re-solved from the user's live, possibly-incorrect board state) — this was an important fix during development, since re-solving a partially-wrong board will often correctly report "no solution exists" even when the puzzle itself is fine.
 
 ## Running Locally
 
-**Frontend:**
-```bash
-cd frontend
-npm install
-npm run dev
-```
+Since the backend is a Vercel serverless function, local development uses the Vercel CLI rather than running Flask directly:
 
-**Backend (serverless function, for local testing with Vercel CLI):**
 ```bash
-npm i -g vercel
+npm install -g vercel
 vercel dev
 ```
 
+This serves both the frontend and the `/api` functions together at `http://localhost:3000`.
+
 ## Future Improvements
-- Difficulty-based puzzle generation (not just fixed presets)
-- Step-by-step solve visualization (animate the backtracking process)
-- Puzzle validity checker before solving (detect contradictions upfront)
+- Verify puzzle generator output has a unique solution (currently prioritizes generation speed over uniqueness guarantees)
+- Leaderboards / comparing stats with other users
+- Multiplayer race mode
