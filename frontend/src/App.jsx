@@ -768,18 +768,28 @@ function App() {
       )}
 
       {visualizing && (
-        <div className="viz-controls">
-          <button className="control-btn" onClick={toggleVizPlay}>{vizPlaying ? '⏸ Pause' : '▶️ Play'}</button>
-          <button className="control-btn" onClick={skipToEnd}>⏭ Skip to End</button>
-          <button className="control-btn" onClick={stopVisualization}>✕ Stop</button>
-          <select value={vizSpeed} onChange={(e) => setVizSpeed(Number(e.target.value))}>
-            <option value={100}>Slow</option>
-            <option value={30}>Normal</option>
-            <option value={5}>Fast</option>
-          </select>
-          <span className="viz-progress">{vizIndex} / {vizStepsRef.current.length} steps</span>
-        </div>
-      )}
+  <div className="viz-controls">
+    <button className="control-btn" onClick={toggleVizPlay}>{vizPlaying ? '⏸ Pause' : '▶️ Play'}</button>
+    <button className="control-btn" onClick={skipToEnd}>⏭ Skip to End</button>
+    <button className="control-btn" onClick={stopVisualization}>✕ Stop</button>
+    <select value={vizSpeed} onChange={(e) => setVizSpeed(Number(e.target.value))}>
+      <option value={500}>Slow</option>
+      <option value={150}>Normal</option>
+      <option value={30}>Fast</option>
+    </select>
+    <span className="viz-progress">{vizIndex} / {vizStepsRef.current.length} steps</span>
+  </div>
+)}
+{visualizing && (
+  <div className="viz-legend">
+    <span className="legend-item"><span className="legend-swatch place"></span> Placing a number</span>
+    <span className="legend-item"><span className="legend-swatch remove"></span> Backtracking (undoing a wrong guess)</span>
+    <span className="legend-counts">
+      ✅ Placements: {vizStepsRef.current.slice(0, vizIndex).filter(s => s.type === 'place').length} &nbsp;|&nbsp;
+      ↩️ Backtracks: {vizStepsRef.current.slice(0, vizIndex).filter(s => s.type === 'remove').length}
+    </span>
+  </div>
+)}
 
       {showStatsPanel && (
         <div className="stats-panel">

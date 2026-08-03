@@ -517,3 +517,42 @@ button:disabled {
 .app.dark .cell.viz-remove {
   background-color: #6e3229;
 }
+
+.viz-legend {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #555;
+}
+
+.app.dark .viz-legend {
+  color: #ccc;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.legend-swatch.place {
+  background-color: #c8e6c9;
+}
+
+.legend-swatch.remove {
+  background-color: #ffccbc;
+}
+
+.viz-counts, .legend-counts {
+  font-weight: 600;
+}
